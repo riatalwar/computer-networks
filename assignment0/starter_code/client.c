@@ -17,26 +17,12 @@
  * Return 0 on success, non-zero on failure
 */
 int client(char *server_ip, char *server_port) {
-  /*
-  socket()
-  bind() to specified port
-  connect()
-  read from stdin--will require looping to ensure that all input is read (literally why r we using c making this more difficult for no reason)
-  send() msg including the stdin stream
-  exit after msg is successfully sent
-  iterative read/send flow instead of reading everything and sending everything in two large batches
-  client should andle partial sends: socket only transmits parts of data, need to resend remaining until complete
-
-  failure at any of these points should result in a nonzero err code
-  graceful err handling of socket fns
-  */
-
     int status, sockfd;
     struct addrinfo hints;
     struct addrinfo *sockaddr_in;
 
     memset(&hints, 0, sizeof hints); // make sure the struct is empty
-    hints.ai_family = AF_INET;     // IPv4
+    hints.ai_family = AF_INET;       // IPv4
     hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
     hints.ai_flags = 0;
 
@@ -45,27 +31,22 @@ int client(char *server_ip, char *server_port) {
         exit(1);
     }
 
+    // Create socket
     sockfd = socket(sockaddr_in->ai_family, sockaddr_in->ai_socktype, sockaddr_in->ai_protocol);
     if (sockfd == -1) {
-        // err creating socket
         perror("Socket error");
         exit(1);
     }
 
-    // don't need to call bind() as we only care about target port
+    // Connect socket
     if (connect(sockfd, sockaddr_in->ai_addr, sockaddr_in->ai_addrlen) == -1) {
-      // err connecting to server
       perror("Connection error");
       exit(1);
     }
 
-    /*
-    read/send loop
-    int send(int sockfd, const void *msg, int len, int flags); 
-
-    */
     printf("Input: ");
 
+    // Continually read in data to buffer until EOF
     char buf[SEND_BUFFER_SIZE];
     size_t bytes_read;
     while ((bytes_read = fread(buf, 1, sizeof(buf), stdin)) > 0) {
@@ -73,16 +54,21 @@ int client(char *server_ip, char *server_port) {
       ssize_t bytes_sent;
       ssize_t total_sent = 0;
 
+      // Send in chunks until entire message is sent
       while (total_sent < bytes_read && (bytes_sent = send(sockfd, shift, bytes_read - total_sent, 0)) > 0) {
         shift += bytes_sent;
         total_sent += bytes_sent;
       }
-      if (bytes_sent == -1) exit(1);
+
+      // Handle send error
+      if (bytes_sent == -1) {
+        perror("Send error");
+        exit(1);
+      }
     }
 
     close(sockfd); 
     free(sockaddr_in);
-    // make sure all data is freed here -- check for mem leaks
 
     return 0;
 }

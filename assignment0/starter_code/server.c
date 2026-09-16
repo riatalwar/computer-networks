@@ -18,25 +18,12 @@
  * Return 0 on success, non-zero on failure
 */
 int server(char *server_port) {
-  /*
-  socket()
-  bind() to specified port
-  listen() for pending connections (up to 10 should be supported)
-  accept() incoming msgs sequentially
-  receive() msgs into buffer
-  print to stdout
-
-  same err system--gracefully handle errs from socket fns
-  handle both alpha and binary msgs
-
-  must stay open indefinitely (until ext signal like ctrl-c)
-  */
     int status, sockfd;
     struct addrinfo hints;
     struct addrinfo *sockaddr_in;
 
     memset(&hints, 0, sizeof hints); // make sure the struct is empty
-    hints.ai_family = AF_INET;     // IPv4
+    hints.ai_family = AF_INET;       // IPv4
     hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
     hints.ai_flags = AI_PASSIVE;
 
@@ -45,21 +32,21 @@ int server(char *server_port) {
         exit(1);
     }
 
+    // Create socket
     sockfd = socket(sockaddr_in->ai_family, sockaddr_in->ai_socktype, sockaddr_in->ai_protocol);
     if (sockfd == -1) {
-        // err creating socket
         perror("Socket error");
         exit(1);
     }
 
+    // Bind to socket
     if (bind(sockfd, sockaddr_in->ai_addr, sockaddr_in->ai_addrlen) == -1) {
-      // err binding
       perror("Bind error");
       exit(1);
     }
 
+    // Listen for incoming connections--up to QUEUE_LENGTH can be pending
     if (listen(sockfd, QUEUE_LENGTH) == -1) {
-      // err listening
       perror("Listen error");
       exit(1);
     }
@@ -68,30 +55,34 @@ int server(char *server_port) {
     socklen_t addr_size;
     addr_size = sizeof their_addr;
     int conn_fd;
-    // will need to continuously read in data
 
+    // Continuously accept new connections
     while ((conn_fd = accept(sockfd, (struct sockaddr *)&their_addr, &addr_size)) != -1) {
       char buf[RECV_BUFFER_SIZE];
       ssize_t bytes_recv;
+      
+      // Receive data from the established connection
       while ((bytes_recv = recv(conn_fd, buf, sizeof(buf), 0)) > 0) {
+        // Ensure data is pushed to stdout
         fwrite(buf, sizeof(char), bytes_recv, stdout);
         fflush(stdout);
       }
+
+      // Handle receive errors
       if (bytes_recv == -1) {
         perror("Receiving error");
         exit(1);
       }
     }
     
+    // Handle accept error
     if (conn_fd == -1) {
       perror("Accept connection error");
       exit(1);
     }
 
     close(sockfd); 
-
     freeaddrinfo(sockaddr_in);
-    // make sure all data is freed here -- check for mem leaks
 
     return 0;
 }
