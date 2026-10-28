@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <errno.h>
@@ -48,14 +49,14 @@ int proxy(char *proxy_port) {
   // Create socket
   sockfd = socket(sockaddr_in->ai_family, sockaddr_in->ai_socktype, sockaddr_in->ai_protocol);
   if (sockfd == -1) {
-    perror("Socket error");
+    // perror("Socket error");
     freeaddrinfo(sockaddr_in);
     exit(1);
   }
 
   // Bind to socket
   if (bind(sockfd, sockaddr_in->ai_addr, sockaddr_in->ai_addrlen) == -1) {
-    perror("Bind error");
+    // perror("Bind error");
     close(sockfd); 
     freeaddrinfo(sockaddr_in);
     exit(1);
@@ -63,7 +64,7 @@ int proxy(char *proxy_port) {
 
   // Listen for incoming connections--up to QUEUE_LENGTH can be pending
   if (listen(sockfd, QUEUE_LENGTH) == -1) {
-    perror("Listen error");
+    // perror("Listen error");
     close(sockfd); 
     freeaddrinfo(sockaddr_in);
     exit(1);
@@ -80,7 +81,7 @@ int proxy(char *proxy_port) {
     pid_t pid = fork();
 
     if (pid < 0) {
-      perror("Fork failed");
+      // perror("Fork failed");
       close(conn_fd);
     } else if (pid == 0) { 
       // in child process
@@ -117,7 +118,7 @@ int handle_conn(int conn_fd) {
 
   // Handle receive errors
   if (bytes_recv == -1) {
-    perror("Receiving error");
+    // perror("Receiving error");
     exit(1);
   }
 
@@ -139,13 +140,13 @@ int handle_conn(int conn_fd) {
   
   int server_fd = send_request(req);
   if (server_fd < 0) {
-    perror("Request forwarding error");
+    // perror("Request forwarding error");
     ParsedRequest_destroy(req);
     exit(1);
   }
 
   if (get_response(server_fd, conn_fd) < 0) {
-    perror("Response handling error");
+    // perror("Response handling error");
     ParsedRequest_destroy(req);
     exit(1);
   }
@@ -168,28 +169,28 @@ int send_request(struct ParsedRequest * req) {
 
   // Get socket details, default to port 80
   if ((status = getaddrinfo(req->host, req->port ? req->port : "80", &hints, &sockaddr_in)) != 0) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+    // fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
     exit(1);
   }
 
   // Create socket
   sockfd = socket(sockaddr_in->ai_family, sockaddr_in->ai_socktype, sockaddr_in->ai_protocol);
   if (sockfd == -1) {
-    perror("Socket error");
+    // perror("Socket error");
     freeaddrinfo(sockaddr_in);
     exit(1);
   }
 
   // Connect socket
   if (connect(sockfd, sockaddr_in->ai_addr, sockaddr_in->ai_addrlen) == -1) {
-    perror("Connection error");
+    // perror("Connection error");
     freeaddrinfo(sockaddr_in);
     exit(1);
   }
 
   if (ParsedHeader_set(req, "Host", req->host) < 0 ||
       ParsedHeader_set(req, "Connection", "close") < 0) {
-    perror("Header set error");
+    // perror("Header set error");
     freeaddrinfo(sockaddr_in);
     exit(1);
   }
@@ -202,7 +203,7 @@ int send_request(struct ParsedRequest * req) {
   snprintf(buf, line_len + 1, "%s %s HTTP/1.0\r\n", METHOD_GET, req->path);
 
   if (ParsedRequest_unparse_headers(req, buf + line_len, headers_len) != 0) {
-    perror("Buffer creation error");
+    // perror("Buffer creation error");
     free(buf);
     freeaddrinfo(sockaddr_in);
     exit(1);
@@ -210,7 +211,7 @@ int send_request(struct ParsedRequest * req) {
 
   // Handle send error
   if (send_all(sockfd, buf, req_len) < 0) {
-    perror("Send error");
+    // perror("Send error");
     free(buf);
     freeaddrinfo(sockaddr_in);
     exit(1);
@@ -230,14 +231,14 @@ int get_response(int server_fd, int conn_fd) {
   // Receive data from the established connection
   while ((bytes_recv = recv(server_fd, buf, sizeof(buf), 0)) > 0) {
     if (send_all(conn_fd, buf, bytes_recv) < 0) {
-      perror("Send error");
+      // perror("Send error");
       exit(1);
     }
   }
 
   // Handle receive errors
   if (bytes_recv == -1) {
-    perror("Receiving error");
+    // perror("Receiving error");
     close(server_fd);
     exit(1);
   }
