@@ -231,6 +231,43 @@ void handle_icmp(struct sr_instance* sr,
   send_ip_packet(sr, packet, sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_len));
 }
 
+// build + send icmp err
+void send_icmp_error(struct sr_instance* sr,
+        uint8_t * orig_packet/* lent */,
+        uint8_t type,
+        uint8_t code,
+        struct sr_if* src_iface) {
+  sr_ip_hdr_t *orig_ip = (sr_ip_hdr_t *)(orig_packet + sizeof(sr_ethernet_hdr_t));
+
+  // packet buffer to contain all headers
+  unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
+  uint8_t *buf = calloc(1, len);
+  if (!buf) return;
+
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
+  sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+  // icmp header info
+  icmp_hdr->icmp_type = type;
+  icmp_hdr->icmp_code = code;
+  unsigned int data_len = ntohs(orig_ip->ip_len);
+  if (data_len > ICMP_DATA_SIZE) data_len = ICMP_DATA_SIZE;
+  memcpy(icmp_hdr->data, orig_ip, data_len);
+  icmp_hdr->icmp_sum = cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
+
+  // build ip header
+  ip_hdr->ip_v = 4;
+  ip_hdr->ip_hl = sizeof(sr_ip_hdr_t) / 4;
+  ip_hdr->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
+  ip_hdr->ip_ttl = INIT_TTL;
+  ip_hdr->ip_p = ip_protocol_icmp;
+  ip_hdr->ip_src = src_iface->ip;
+  ip_hdr->ip_dst = orig_ip->ip_src;
+  ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+
+  send_ip_packet(sr, buf, len);
+  free(buf);
+}
 
 // find best prefix match for ip address
 struct sr_rt *longest_prefix_match(struct sr_instance* sr, uint32_t ip) {
