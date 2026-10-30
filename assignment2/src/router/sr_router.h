@@ -66,6 +66,11 @@ void sr_init(struct sr_instance* );
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
 void handle_arp(struct sr_instance* , uint8_t * , unsigned int , struct sr_if* );
 void handle_arp_reply(struct sr_instance*, struct sr_if* , sr_arp_hdr_t *);
+void handle_ip(struct sr_instance* , uint8_t * , unsigned int , struct sr_if*);
+void handle_icmp(struct sr_instance* , uint8_t * , unsigned int );
+void send_icmp_error(struct sr_instance* , uint8_t * , uint8_t , uint8_t , struct sr_if* );
+struct sr_rt *longest_prefix_match(struct sr_instance* , uint32_t );
+void send_ip_packet(struct sr_instance* , uint8_t * , unsigned int );
 
 
 /* Add additional helper method declarations here! */
