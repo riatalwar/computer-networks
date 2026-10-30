@@ -287,8 +287,35 @@ struct sr_rt *longest_prefix_match(struct sr_instance* sr, uint32_t ip) {
   }
   return best;
 }
-  } else {
-    // TODO: forward: TTL, lpm, send_ip_packet
+
+// take ip packet and forward based on routing table
+void send_ip_packet(struct sr_instance* sr,
+        uint8_t * buf/* lent */,
+        unsigned int len) {
+  sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)buf;
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
+
+  // ensure routing path is found
+  struct sr_rt *rt = longest_prefix_match(sr, ip_hdr->ip_dst);
+  if (!rt) return;
+  struct sr_if *out = sr_get_interface(sr, rt->interface);
+  if (!out) return;
+
+  // gateway or final dest mac addr
+  uint32_t next_hop = rt->gw.s_addr ? rt->gw.s_addr : ip_hdr->ip_dst;
+
+  eth->ether_type = htons(ethertype_ip);
+  memcpy(eth->ether_shost, out->addr, ETHER_ADDR_LEN);
+
+  // cache lookup for next hop
+  struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop);
+  if (entry) { // hit -> use cache info
+    memcpy(eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+    sr_send_packet(sr, buf, len, out->name);
+    free(entry);
+  } else { // miss -> cache request
+    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop, buf, len, out->name);
+    handle_arpreq(sr, req);
   }
 }
 
