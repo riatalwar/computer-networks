@@ -193,7 +193,25 @@ void handle_ip(struct sr_instance* sr,
   ip_hdr->ip_sum = received_sum;
 
   if (get_interface_from_ip(sr, ip_hdr->ip_dst)) {
-    // TODO: echo or port unreachable reply
+
+// find best prefix match for ip address
+struct sr_rt *longest_prefix_match(struct sr_instance* sr, uint32_t ip) {
+  struct sr_rt *best = NULL;
+  struct sr_rt *rt;
+  // iterate over routing table
+  for (rt = sr->routing_table; rt; rt = rt->next) {
+    // test bitwise & ip/mask for match with dest
+    uint32_t mask = rt->mask.s_addr;
+    if ((ip & mask) != (rt->dest.s_addr & mask)) {
+      continue;
+    }
+    // if match, check if longer than current match
+    if (!best || ntohl(mask) > ntohl(best->mask.s_addr)) {
+      best = rt;
+    }
+  }
+  return best;
+}
   } else {
     // TODO: forward: TTL, lpm, send_ip_packet
   }
