@@ -64,6 +64,9 @@ int sr_read_from_server(struct sr_instance* );
 /* -- sr_router.c -- */
 void sr_init(struct sr_instance* );
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
+void handle_arp(struct sr_instance* , uint8_t * , unsigned int , struct sr_if* );
+void handle_arp_reply(struct sr_instance*, struct sr_if* , sr_arp_hdr_t *);
+
 
 /* Add additional helper method declarations here! */
 
