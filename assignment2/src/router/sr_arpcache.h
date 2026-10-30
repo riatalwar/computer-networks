@@ -147,6 +147,7 @@ int   sr_arpcache_init(struct sr_arpcache *cache);
 int   sr_arpcache_destroy(struct sr_arpcache *cache);
 void *sr_arpcache_timeout(void *cache_ptr);
 void handle_arpreq(struct sr_instance *, struct sr_arpreq *);
+void send_arp_request(struct sr_instance *, struct sr_arpreq *);
 
 /* IMPORTANT: To avoid circular dependencies, do a forward declaration of any
 methods from other files that you need to use. For example, if your sr_arpcache
@@ -161,7 +162,9 @@ since sr_router already imports sr_arpcache.h! - KM */
 /* sr_router.h */
 /* list any declarations that you need here */
 struct sr_if;
+struct sr_rt;
 void send_icmp_error(struct sr_instance *, uint8_t *, uint8_t, uint8_t, struct sr_if *);
+struct sr_rt *longest_prefix_match(struct sr_instance *, uint32_t);
 
 /* sr_if.h */
 struct sr_if *sr_get_interface(struct sr_instance *, const char *);
