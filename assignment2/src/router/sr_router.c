@@ -99,6 +99,7 @@ void sr_handlepacket(struct sr_instance* sr,
     if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
       return; // drop packet, invalid size
     }
+    handle_ip(sr, packet, len, intfc);
   } else {
     return; // drop unknown types
   }
@@ -169,6 +170,34 @@ void handle_arp_reply(struct sr_instance* sr, struct sr_if* interface, sr_arp_hd
   sr_arpreq_destroy(&sr->cache, req);
 }
 
+void handle_ip(struct sr_instance* sr,
+        uint8_t * packet/* lent */,
+        unsigned int len,
+        struct sr_if* interface/* lent */) {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+  unsigned int hdr_len = ip_hdr->ip_len * 4;
+
+  if (ip_hdr->ip_v != 4 || hdr_len < sizeof(sr_ip_hdr_t)) {
+    return; // invalid vers or header len
+  }
+  if (len < sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_hl) ||
+      ntohs(ip_hdr->ip_len) < hdr_len) {
+    return; // invalid size
+  }
+
+  uint16_t received_sum = ip_hdr->ip_sum;
+  ip_hdr->ip_sum = 0;
+  if (cksum(ip_hdr, hdr_len) != received_sum) {
+    return; // invalid checksum
+  }
+  ip_hdr->ip_sum = received_sum;
+
+  if (get_interface_from_ip(sr, ip_hdr->ip_dst)) {
+    // TODO: echo or port unreachable reply
+  } else {
+    // TODO: forward: TTL, lpm, send_ip_packet
+  }
+}
 
 /* Add any additional helper methods here & don't forget to also declare
 them in sr_router.h.
