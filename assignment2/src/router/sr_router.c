@@ -193,6 +193,33 @@ void handle_ip(struct sr_instance* sr,
   ip_hdr->ip_sum = received_sum;
 
   if (get_interface_from_ip(sr, ip_hdr->ip_dst)) {
+    if (ip_hdr->ip_p == ip_protocol_icmp) {
+      handle_icmp(sr, packet, len);
+    } else if (ip_hdr->ip_p == ip_protocol_tcp || ip_hdr->ip_p == ip_protocol_udp) {
+      // tcp/udp -> err
+      send_icmp_error(sr, packet, icmp_type_dest_unreachable, icmp_code_port_unreachable, interface);
+    }
+    // ignore others
+  } else {
+    // expired ttl -> time err
+    if (ip_hdr->ip_ttl <= 1) {
+      send_icmp_error(sr, packet, icmp_type_time_exceeded, 0, interface);
+      return;
+    }
+    // no match -> unreachable err
+    if (!longest_prefix_match(sr, ip_hdr->ip_dst)) {
+      send_icmp_error(sr, packet, icmp_type_dest_unreachable, icmp_code_net_unreachable, interface);
+      return;
+    }
+
+    // decrement ttl and recompute checksum
+    ip_hdr->ip_ttl--;
+    ip_hdr->ip_sum = 0;
+    ip_hdr->ip_sum = cksum(ip_hdr, hdr_len);
+
+    send_ip_packet(sr, packet, sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_len));
+  }
+}
 
 void handle_icmp(struct sr_instance* sr,
         uint8_t * packet/* lent */,
