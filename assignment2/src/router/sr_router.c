@@ -194,6 +194,44 @@ void handle_ip(struct sr_instance* sr,
 
   if (get_interface_from_ip(sr, ip_hdr->ip_dst)) {
 
+void handle_icmp(struct sr_instance* sr,
+        uint8_t * packet/* lent */,
+        unsigned int len) {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+  unsigned int hdr_len = ip_hdr->ip_hl * 4;
+  unsigned int icmp_len = ntohs(ip_hdr->ip_len) - hdr_len;
+  if (icmp_len < ICMP_HDR_LEN) {
+    return; // invalid len
+  }
+
+  sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)((uint8_t *)ip_hdr + hdr_len);
+  uint16_t received_sum = icmp_hdr->icmp_sum;
+  icmp_hdr->icmp_sum = 0;
+  if (cksum(icmp_hdr, icmp_len) != received_sum) {
+    return; // invalid checksum
+  }
+
+  if (icmp_hdr->icmp_type != icmp_type_echo_request) {
+    return; // only answer echo requests
+  }
+
+  // echo payload--build reply
+  icmp_hdr->icmp_type = icmp_type_echo_reply;
+  icmp_hdr->icmp_code = 0;
+  icmp_hdr->icmp_sum = cksum(icmp_hdr, icmp_len);
+  // swap src/dest for response
+  uint32_t tmp = ip_hdr->ip_src;
+  ip_hdr->ip_src = ip_hdr->ip_dst;
+  ip_hdr->ip_dst = tmp;
+  ip_hdr->ip_ttl = INIT_TTL;
+  ip_hdr->ip_sum = 0;
+  ip_hdr->ip_sum = cksum(ip_hdr, hdr_len);
+
+  // send reply
+  send_ip_packet(sr, packet, sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_len));
+}
+
+
 // find best prefix match for ip address
 struct sr_rt *longest_prefix_match(struct sr_instance* sr, uint32_t ip) {
   struct sr_rt *best = NULL;
