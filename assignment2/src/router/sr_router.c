@@ -175,12 +175,12 @@ void handle_ip(struct sr_instance* sr,
         unsigned int len,
         struct sr_if* interface/* lent */) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
-  unsigned int hdr_len = ip_hdr->ip_len * 4;
+  unsigned int hdr_len = ip_hdr->ip_hl * 4;
 
   if (ip_hdr->ip_v != 4 || hdr_len < sizeof(sr_ip_hdr_t)) {
     return; // invalid vers or header len
   }
-  if (len < sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_hl) ||
+  if (len < sizeof(sr_ethernet_hdr_t) + ntohs(ip_hdr->ip_len) ||
       ntohs(ip_hdr->ip_len) < hdr_len) {
     return; // invalid size
   }
