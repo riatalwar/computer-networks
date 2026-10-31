@@ -9,6 +9,7 @@
 #include "sr_arpcache.h"
 #include "sr_router.h"
 #include "sr_if.h"
+#include "sr_rt.h"
 #include "sr_protocol.h"
 
 /*
@@ -17,9 +18,17 @@
   See the comments in the header file for an idea of what it should look like.
 */
 void sr_arpcache_sweepreqs(struct sr_instance *sr) {
-    /* fill in code here */
+    struct sr_arpreq *req = sr->cache.requests;
+    struct sr_arpreq *next;
+    // for each req in chain, handle or destroy (managed by handle_arpreq)
+    while (req) {
+        next = req->next;
+        handle_arpreq(sr, req);
+        req = next;
+    }
 }
 
+// resend req until host unreachable
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *request) {
     pthread_mutex_lock(&(sr->cache.lock));
 
