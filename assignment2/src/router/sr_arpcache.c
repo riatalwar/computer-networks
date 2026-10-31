@@ -21,6 +21,33 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
 }
 
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *request) {
+    pthread_mutex_lock(&(sr->cache.lock));
+
+    time_t now = time(NULL);
+    if (difftime(now, request->sent) > 1.0) { // 1 s intervals
+        if (request->times_sent >= 5) { // 5 sends w/o response -> unreachable
+            // destroy all packets and send host unreachable
+            struct sr_packet *p;
+            for (p = request->packets; p; p = p->next) {
+                sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(p->buf + sizeof(sr_ethernet_hdr_t));
+                struct sr_rt *rt = longest_prefix_match(sr, ip_hdr->ip_src);
+                if (!rt) continue;
+                struct sr_if *src_iface = sr_get_interface(sr, rt->interface);
+                if (!src_iface) continue;
+                send_icmp_error(sr, p->buf, icmp_type_dest_unreachable,
+                                icmp_code_host_unreachable, src_iface);
+            }
+            sr_arpreq_destroy(&(sr->cache), request);
+        } else {
+            // send req with updated sent/count
+            send_arp_request(sr, request);
+            request->sent = now;
+            request->times_sent++;
+        }
+    }
+
+    pthread_mutex_unlock(&(sr->cache.lock));
+}
 
 // single request to find ip
 void send_arp_request(struct sr_instance *sr, struct sr_arpreq *request) {
