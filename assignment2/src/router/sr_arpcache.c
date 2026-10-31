@@ -21,7 +21,39 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
 }
 
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *request) {
-    /* fill in code here */
+
+// single request to find ip
+void send_arp_request(struct sr_instance *sr, struct sr_arpreq *request) {
+    // get interface from first packet
+    struct sr_if *iface = sr_get_interface(sr, request->packets->iface);
+    if (!iface) return;
+
+    // buffer for headers
+    unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
+    uint8_t *buf = calloc(1, len);
+    if (!buf) return;
+
+    // get ethernet and arp headers
+    sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)buf;
+    sr_arp_hdr_t *arp = (sr_arp_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
+
+    // set ethernet hdr field
+    memset(eth->ether_dhost, 0xff, ETHER_ADDR_LEN); // broadcast
+    memcpy(eth->ether_shost, iface->addr, ETHER_ADDR_LEN); // src
+    eth->ether_type = htons(ethertype_arp); // arp request
+
+    // arp header
+    arp->ar_hrd = htons(arp_hrd_ethernet);
+    arp->ar_pro = htons(ethertype_ip);
+    arp->ar_hln = ETHER_ADDR_LEN;
+    arp->ar_pln = sizeof(uint32_t);
+    arp->ar_op = htons(arp_op_request);
+    memcpy(arp->ar_sha, iface->addr, ETHER_ADDR_LEN);
+    arp->ar_sip = iface->ip;
+    arp->ar_tip = request->ip;
+
+    sr_send_packet(sr, buf, len, iface->name);
+    free(buf);
 }
 
 /* You should not need to touch the rest of this code. */
