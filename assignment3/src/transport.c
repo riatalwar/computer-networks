@@ -37,6 +37,7 @@ typedef struct
     tcp_seq initial_sequence_num;
 
     /* any other connection-wide global variables go here */
+    tcp_seq current_sequence_num;
 } context_t;
 
 
@@ -56,6 +57,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
     assert(ctx);
 
     generate_initial_seq_num(ctx);
+    ctx->current_sequence_num = ctx->initial_sequence_num;
 
     /* XXX: you should send a SYN packet here if is_active, or wait for one
      * to arrive if !is_active.  after the handshake completes, unblock the
@@ -69,43 +71,112 @@ void transport_init(mysocket_t sd, bool_t is_active)
 
     if (is_active) {
         // send syn packet
-            // with seq num generated above
-            // allocate header, empty payload
-            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
-            // if return -1, failure
+        STCPHeader *syn = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(syn);
+        syn->th_seq = htonl(ctx->initial_sequence_num);
+        syn->th_flags = TH_SYN;
+        syn->th_off = sizeof(STCPHeader) / 4;
+        ssize_t sent = stcp_network_send(sd, syn, sizeof(STCPHeader), NULL);
+        if (sent == -1 || (unsigned long) sent < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(syn);
+            free(ctx);
+            return;
+        }
+        free(syn);
 
         // wait for syn ack
-            // expect seq num + 1
-            // get seqy num + 1
-            // expect no data beyond header
-            // -1 for failure
-            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
+        STCPHeader *syn_ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(syn_ack);
+        ssize_t recv = stcp_network_recv(sd, syn_ack, sizeof(STCPHeader));
+        if (recv == -1 || (unsigned long) recv < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(syn_ack);
+            free(ctx);
+            return;
+        }
+        tcp_seq syn_num = ntohl(syn_ack->th_seq);
+        if (ntohl(syn_ack->th_ack) != ctx->initial_sequence_num + 1) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(syn_ack);
+            free(ctx);
+            return;
+        }
+        free(syn_ack);
+        ctx->current_sequence_num++;
 
         // send ack
-            // with seqy num + 1
-            // no actual data in src, header only
-            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
-            // if return -1, failure
+        STCPHeader *ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(ack);
+        ack->th_seq = htonl(ctx->current_sequence_num);
+        ack->th_ack = htonl(syn_num + 1);
+        ack->th_flags = TH_ACK;
+        ack->th_off = sizeof(STCPHeader) / 4;
+        ssize_t sent_ack = stcp_network_send(sd, ack, sizeof(STCPHeader), NULL);
+        if (sent_ack == -1 || (unsigned long) sent_ack < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(ack);
+            free(ctx);
+            return;
+        }
+        free(ack);
 
     } else {
         // wait for syn
-            // get synx num
-            // expect no data beyond header
-            // -1 for failure
-            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
+        STCPHeader *syn = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(syn);
+        ssize_t recv = stcp_network_recv(sd, syn, sizeof(STCPHeader));
+        if (recv == -1 || (unsigned long) recv < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(syn);
+            free(ctx);
+            return;
+        }
+        tcp_seq syn_num = ntohl(syn->th_seq);
+        free(syn);
 
         // send syn ack
-            // with synx num + 1
-            // no data to send, only SYN numbers in header
-            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
-            // if return -1, failure
+        STCPHeader *syn_ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(syn_ack);
+        syn_ack->th_seq = htonl(ctx->initial_sequence_num);
+        syn_ack->th_ack = htonl(syn_num + 1);
+        syn_ack->th_flags = TH_SYN | TH_ACK;
+        syn_ack->th_off = sizeof(STCPHeader) / 4;
+        ssize_t sent = stcp_network_send(sd, syn_ack, sizeof(STCPHeader), NULL);
+        if (sent == -1 || (unsigned long) sent < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(syn_ack);
+            free(ctx);
+            return;
+        }
+        free(syn_ack);
 
         // wait for ack
-            // done, expect synack syny + 1
-            // no data expected beyond header
-            // -1 for failure
-            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
-
+        STCPHeader *ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+        assert(ack);
+        ssize_t recv_ack = stcp_network_recv(sd, ack, sizeof(STCPHeader));
+        if (recv_ack == -1 || (unsigned long) recv_ack < sizeof(STCPHeader)) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(ack);
+            free(ctx);
+            return;
+        }
+        if (ntohl(ack->th_ack) != ctx->initial_sequence_num + 1) {
+            errno = ECONNREFUSED;
+            stcp_unblock_application(sd);
+            free(ack);
+            free(ctx);
+            return;
+        }
+        free(ack);
+        ctx->current_sequence_num++;
     }
     ctx->connection_state = CSTATE_ESTABLISHED;
     stcp_unblock_application(sd);
