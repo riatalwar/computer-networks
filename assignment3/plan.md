@@ -1,0 +1,38 @@
+# Plan
+## Summary of project components
+- STCP protocol
+  - guarantee in order delivery
+  - bidirectional data flow
+  - connection oriented (maintained state)
+  - data stream
+  - break down and reassemble packets
+  - active/passive sides of the connection (client/server)
+- sequence numbers
+  - sequentially number SYN, FIN, bytes of data
+  - start at random # (0, 255)
+  - SYN, FIN glafs -> 1 byte of seq space so non-data SYN/FIN packets are handled
+  - set in every packet
+  - pure ACK (no data, SYN, nor FIN) -> seq # = next unsent seq #
+- data packets
+  - max payload: 536
+  - th_seq: seq number of first byte in payload
+  - sent asap when data available
+- ACK packets
+  - ACK bit: th_ack=next expected seq #
+  - sent asap at receipt
+  - duplicate data: reack with current next expected
+- sliding window
+  - receiver window: range of accepted seq #s at given time
+  - send data with seq # up to limit, slide window as ACKs are sent
+  - sender window = sz(receiver window on other side) -- max amount of data unACKed
+  - receiver and congestion window: 3072 bytes
+  - not adaptive
+  - data outside congestion window not send
+  - first byte = last unACKed byte
+- initiation
+  - 3-way handshake
+  - active SYN: seqx -> passive SYN_ACK: seqy, seqx+1 -> active SYN_ACK seqy+1 -> established state
+- termination
+  - 4-way handshake
+  - peer1 FIN flag -> peer2 ACK & peer2 FIN flag -> peer1 ACK
+  - conn closed after both ACKS

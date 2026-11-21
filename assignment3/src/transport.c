@@ -22,6 +22,8 @@
 
 enum { 
     CSTATE_ESTABLISHED
+    // closed
+    // initialized (?)
 
 };    /* obviously you should have more states */
 
@@ -62,20 +64,47 @@ void transport_init(mysocket_t sd, bool_t is_active)
      * if connection fails; to do so, just set errno appropriately (e.g. to
      * ECONNREFUSED, etc.) before calling the function.
      */
+    // void stcp_set_context(mysocket_t sd, const void *stcp_state);
+    // void *stcp_get_context(mysocket_t my_sd);
 
     if (is_active) {
         // send syn packet
+            // with seq num generated above
+            // allocate header, empty payload
+            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
+            // if return -1, failure
 
         // wait for syn ack
+            // expect seq num + 1
+            // get seqy num + 1
+            // expect no data beyond header
+            // -1 for failure
+            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
 
         // send ack
+            // with seqy num + 1
+            // no actual data in src, header only
+            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
+            // if return -1, failure
 
     } else {
         // wait for syn
+            // get synx num
+            // expect no data beyond header
+            // -1 for failure
+            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
 
         // send syn ack
+            // with synx num + 1
+            // no data to send, only SYN numbers in header
+            // ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
+            // if return -1, failure
 
         // wait for ack
+            // done, expect synack syny + 1
+            // no data expected beyond header
+            // -1 for failure
+            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
 
     }
     ctx->connection_state = CSTATE_ESTABLISHED;
@@ -98,7 +127,8 @@ static void generate_initial_seq_num(context_t *ctx)
     ctx->initial_sequence_num = 1;
 #else
     /* you have to fill this up */
-    /*ctx->initial_sequence_num =;*/
+    int num = rand() % 256;
+    ctx->initial_sequence_num = num;
 #endif
 }
 
@@ -127,15 +157,35 @@ static void control_loop(mysocket_t sd, context_t *ctx)
         {
             /* the application has requested that data be sent */
             /* see stcp_app_recv() */
+            // dst is buffer to receive data
+            // maxlen 536 bytes can be sent at once (excluding header size)
+            // either get amount of data received, or -1 for failure
+            // size_t stcp_app_recv(mysocket_t sd, void *dst, size_t max_len);
+
+            // send out src data from dst, length is the output of app recv
+            //ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
+            // if return -1, failure
+            // else returns bytes sent
+            // if bytes sent < expected, resend?
         }
 
         if (event & NETWORK_DATA) {
             /* received data from STCP peer */
+            // dst is buffer to receive data
+            // maxlen 536 bytes can be received at once (excluding header size)
+            // either get amount of data received, or -1 for failure
+            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
+
+            // send out src data from dst, length is the output of app recv
+            // void stcp_app_send(mysocket_t sd, const void *src, size_t src_len);
+            // assume success because void?
+
         }
 
         if (event & APP_CLOSE_REQUESTED) {
 
         }
+        //void stcp_fin_received(mysocket_t sd);
 
         /* etc. */
     }
