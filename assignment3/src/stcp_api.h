@@ -17,7 +17,8 @@ typedef enum
     APP_DATA            = 1,
     NETWORK_DATA        = 2,
     APP_CLOSE_REQUESTED = 4,
-    ANY_EVENT           = APP_DATA | NETWORK_DATA | APP_CLOSE_REQUESTED
+    ANY_EVENT           = APP_DATA | NETWORK_DATA | APP_CLOSE_REQUESTED,
+    RECV_ONLY           = NETWORK_DATA | APP_CLOSE_REQUESTED
 } stcp_event_type_t;
 
 

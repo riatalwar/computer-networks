@@ -39,9 +39,10 @@ typedef struct
     tcp_seq initial_sequence_num;
 
     /* any other connection-wide global variables go here */
-    tcp_seq current_sequence_num;
-    tcp_seq next_expected_sequence_num;
-    tcp_seq last_acked_sequence_num;
+    tcp_seq current_sequence_num;       // next seq num to send
+    tcp_seq next_expected_sequence_num; // expected from peer
+    tcp_seq last_acked_sequence_num;    // last acked by peer
+    size_t peer_window;                 // peer window sz
 } context_t;
 
 
@@ -80,6 +81,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
         syn->th_seq = htonl(ctx->initial_sequence_num);
         syn->th_flags = TH_SYN;
         syn->th_off = sizeof(STCPHeader) / 4;
+        syn->th_win = htons(3072);
         ssize_t sent = stcp_network_send(sd, syn, sizeof(STCPHeader), NULL);
         if (sent == -1 || (unsigned long) sent < sizeof(STCPHeader)) {
             errno = ECONNREFUSED;
@@ -101,8 +103,9 @@ void transport_init(mysocket_t sd, bool_t is_active)
             free(ctx);
             return;
         }
+        // validate flags and seq num
         tcp_seq syn_num = ntohl(syn_ack->th_seq);
-        if (ntohl(syn_ack->th_ack) != ctx->initial_sequence_num + 1) {
+        if (syn_ack->th_flags != (TH_SYN | TH_ACK) || ntohl(syn_ack->th_ack) != ctx->initial_sequence_num + 1) {
             errno = ECONNREFUSED;
             stcp_unblock_application(sd);
             free(syn_ack);
@@ -111,6 +114,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
         }
         ctx->current_sequence_num++;
         ctx->last_acked_sequence_num = ntohl(syn_ack->th_ack);
+        ctx->peer_window = ntohs(syn_ack->th_win);
         free(syn_ack);
 
         // send ack
@@ -120,6 +124,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
         ack->th_ack = htonl(syn_num + 1);
         ack->th_flags = TH_ACK;
         ack->th_off = sizeof(STCPHeader) / 4;
+        ack->th_win = htons(3072);
         ssize_t sent_ack = stcp_network_send(sd, ack, sizeof(STCPHeader), NULL);
         if (sent_ack == -1 || (unsigned long) sent_ack < sizeof(STCPHeader)) {
             errno = ECONNREFUSED;
@@ -144,6 +149,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
             return;
         }
         tcp_seq syn_num = ntohl(syn->th_seq);
+        ctx->peer_window = ntohs(syn->th_win);
         free(syn);
 
         // send syn ack
@@ -153,6 +159,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
         syn_ack->th_ack = htonl(syn_num + 1);
         syn_ack->th_flags = TH_SYN | TH_ACK;
         syn_ack->th_off = sizeof(STCPHeader) / 4;
+        syn_ack->th_win = htons(3072);
         ssize_t sent = stcp_network_send(sd, syn_ack, sizeof(STCPHeader), NULL);
         if (sent == -1 || (unsigned long) sent < sizeof(STCPHeader)) {
             errno = ECONNREFUSED;
@@ -175,7 +182,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
             free(ctx);
             return;
         }
-        if (ntohl(ack->th_ack) != ctx->initial_sequence_num + 1) {
+        if (ack->th_flags != TH_ACK || ntohl(ack->th_ack) != ctx->initial_sequence_num + 1) {
             errno = ECONNREFUSED;
             stcp_unblock_application(sd);
             free(ack);
@@ -184,6 +191,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
         }
         ctx->current_sequence_num++;
         ctx->last_acked_sequence_num = ntohl(ack->th_ack);
+        ctx->peer_window = ntohs(ack->th_win);
         free(ack);
     }
     ctx->connection_state = CSTATE_ESTABLISHED;
@@ -228,8 +236,15 @@ static void control_loop(mysocket_t sd, context_t *ctx)
         unsigned int event;
 
         /* see stcp_api.h or stcp_api.c for details of this function */
-        /* XXX: you will need to change some of these arguments! */
-        event = stcp_wait_for_event(sd, ANY_EVENT, NULL);
+        // basically check if amt of data in flight exceeds peer window sz
+        // if that's the case we can't send more data atm
+        stcp_event_type_t e = ANY_EVENT;
+        tcp_seq in_flight = ctx->current_sequence_num - ctx->last_acked_sequence_num;
+        size_t window = MIN(ctx->peer_window, 3072);
+        if (in_flight >= window) {
+            e = RECV_ONLY;
+        }
+        event = stcp_wait_for_event(sd, e, NULL);
 
         /* check whether it was the network, app, or a close request */
         if (event & APP_DATA)
@@ -238,7 +253,7 @@ static void control_loop(mysocket_t sd, context_t *ctx)
             // read in app data
             char *app_buf = (char *) calloc(1, STCP_MSS);
             assert(app_buf);
-            size_t app_len = stcp_app_recv(sd, app_buf, STCP_MSS);
+            size_t app_len = stcp_app_recv(sd, app_buf, MIN(STCP_MSS, window - in_flight));
 
             // set header (current seq num, next expected + ack, header offset, window sz)
             STCPHeader *data_hdr = (STCPHeader *) calloc(1, sizeof(STCPHeader));
@@ -267,7 +282,7 @@ static void control_loop(mysocket_t sd, context_t *ctx)
             assert(net_buf);
             ssize_t recvd = stcp_network_recv(sd, net_buf, sizeof(STCPHeader) + STCP_MSS);
             if (recvd == -1 || (size_t) recvd < sizeof(STCPHeader)) {
-                // handle error / drop
+                // TODO: handle error / drop
             }
 
             // compute header vs payload segments
@@ -275,6 +290,7 @@ static void control_loop(mysocket_t sd, context_t *ctx)
             size_t data_start = TCP_DATA_START(net_buf);
             size_t payload_len = recvd - data_start;
             tcp_seq seq = ntohl(hdr->th_seq);
+            ctx->peer_window = ntohs(hdr->th_win);
 
             // ensure in order delivery with matching next expected seq num
             if (payload_len > 0 && seq == ctx->next_expected_sequence_num) {
