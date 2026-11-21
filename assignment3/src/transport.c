@@ -21,10 +21,12 @@
 
 
 enum { 
-    CSTATE_ESTABLISHED
-    // closed
-    // initialized (?)
-
+    CSTATE_ESTABLISHED,
+    CSTATE_SENT_CLOSE,  // sent close, not acked
+    CSTATE_ACKED_CLOSE, // sent close, got ack
+    CSTATE_RECV_CLOSE,  // recv close, not sent
+    CSTATE_RECV_SENT_CLOSE, // recv close, sent but not acked
+    CSTATE_CLOSED       // recv close, sent and got ack
 };    /* obviously you should have more states */
 
 
@@ -286,11 +288,37 @@ static void control_loop(mysocket_t sd, context_t *ctx)
                 if (ack > ctx->last_acked_sequence_num) {
                     ctx->last_acked_sequence_num = ack;
                 }
+                // check for FIN ack
+                if (ack == ctx->current_sequence_num) {
+                    if (ctx->connection_state == CSTATE_SENT_CLOSE) {
+                        ctx->connection_state = CSTATE_ACKED_CLOSE;
+                    } else if (ctx->connection_state == CSTATE_RECV_SENT_CLOSE) {
+                        ctx->connection_state = CSTATE_CLOSED;
+                        ctx->done = TRUE;
+                    }
+                }
+
+            }
+
+            // check for FIN
+            bool_t fin_recvd = FALSE;
+            if ((hdr->th_flags & TH_FIN) && seq + payload_len == ctx->next_expected_sequence_num) {
+                fin_recvd = TRUE;
+                ctx->next_expected_sequence_num++;
+                stcp_fin_received(sd);
+                if (ctx->connection_state == CSTATE_ESTABLISHED) {
+                    ctx->connection_state = CSTATE_RECV_CLOSE;
+                } else if (ctx->connection_state == CSTATE_SENT_CLOSE) {
+                    ctx->connection_state = CSTATE_RECV_SENT_CLOSE;
+                } else if (ctx->connection_state == CSTATE_ACKED_CLOSE) {
+                    ctx->connection_state = CSTATE_CLOSED;
+                    ctx->done = TRUE;
+                }
             }
             free(net_buf);
         
-            // ack packets with data
-            if (payload_len > 0) {
+            // ack packets with data or FIN packets
+            if (payload_len > 0 || fin_recvd) {
                 // assemble ack header with current seq num and next expected
                 STCPHeader *ack_hdr = (STCPHeader *) calloc(1, sizeof(STCPHeader));
                 assert(ack_hdr);
@@ -310,9 +338,28 @@ static void control_loop(mysocket_t sd, context_t *ctx)
         }
 
         if (event & APP_CLOSE_REQUESTED) {
+            // allocate fin header with FIN flag, otherwise same as usual
+            STCPHeader *fin_hdr = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+            assert(fin_hdr);
+            fin_hdr->th_seq = htonl(ctx->current_sequence_num);
+            fin_hdr->th_ack = htonl(ctx->next_expected_sequence_num);
+            fin_hdr->th_flags = TH_FIN | TH_ACK;
+            fin_hdr->th_off = sizeof(STCPHeader) / 4;
+            fin_hdr->th_win = htons(3072);
 
+            // send the FIN header
+            ssize_t fin_sent = stcp_network_send(sd, fin_hdr, sizeof(STCPHeader), NULL);
+            if (fin_sent == -1 || (size_t) fin_sent < sizeof(STCPHeader)) {
+                // TODO: handle error
+            }
+            free(fin_hdr);
+            ctx->current_sequence_num++;
+            if (ctx->connection_state == CSTATE_ESTABLISHED) {
+                    ctx->connection_state = CSTATE_SENT_CLOSE;
+            } else if (ctx->connection_state == CSTATE_RECV_CLOSE) {
+                ctx->connection_state = CSTATE_RECV_SENT_CLOSE;
+            }
         }
-        //void stcp_fin_received(mysocket_t sd);
 
         /* etc. */
     }
