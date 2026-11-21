@@ -15,6 +15,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
+#include <arpa/inet.h>
 #include "mysock.h"
 #include "stcp_api.h"
 #include "transport.h"
@@ -71,8 +73,6 @@ void transport_init(mysocket_t sd, bool_t is_active)
      * if connection fails; to do so, just set errno appropriately (e.g. to
      * ECONNREFUSED, etc.) before calling the function.
      */
-    // void stcp_set_context(mysocket_t sd, const void *stcp_state);
-    // void *stcp_get_context(mysocket_t my_sd);
 
     if (is_active) {
         // send syn packet
