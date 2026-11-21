@@ -238,11 +238,11 @@ static void control_loop(mysocket_t sd, context_t *ctx)
         /* see stcp_api.h or stcp_api.c for details of this function */
         // basically check if amt of data in flight exceeds peer window sz
         // if that's the case we can't send more data atm
-        stcp_event_type_t e = ANY_EVENT;
+        unsigned int e = ANY_EVENT;
         tcp_seq in_flight = ctx->current_sequence_num - ctx->last_acked_sequence_num;
         size_t window = MIN(ctx->peer_window, 3072);
         if (in_flight >= window) {
-            e = RECV_ONLY;
+            e = NETWORK_DATA | APP_CLOSE_REQUESTED;
         }
         event = stcp_wait_for_event(sd, e, NULL);
 
@@ -332,7 +332,7 @@ static void control_loop(mysocket_t sd, context_t *ctx)
                 }
             }
             free(net_buf);
-        
+
             // ack packets with data or FIN packets
             if (payload_len > 0 || fin_recvd) {
                 // assemble ack header with current seq num and next expected
