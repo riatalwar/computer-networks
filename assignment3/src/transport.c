@@ -38,6 +38,8 @@ typedef struct
 
     /* any other connection-wide global variables go here */
     tcp_seq current_sequence_num;
+    tcp_seq next_expected_sequence_num;
+    tcp_seq last_acked_sequence_num;
 } context_t;
 
 
@@ -105,8 +107,9 @@ void transport_init(mysocket_t sd, bool_t is_active)
             free(ctx);
             return;
         }
-        free(syn_ack);
         ctx->current_sequence_num++;
+        ctx->last_acked_sequence_num = ntohl(syn_ack->th_ack);
+        free(syn_ack);
 
         // send ack
         STCPHeader *ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
@@ -124,6 +127,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
             return;
         }
         free(ack);
+        ctx->next_expected_sequence_num = syn_num + 1;
 
     } else {
         // wait for syn
@@ -156,6 +160,7 @@ void transport_init(mysocket_t sd, bool_t is_active)
             return;
         }
         free(syn_ack);
+        ctx->next_expected_sequence_num = syn_num + 1;
 
         // wait for ack
         STCPHeader *ack = (STCPHeader *) calloc(1, sizeof(STCPHeader));
@@ -175,8 +180,9 @@ void transport_init(mysocket_t sd, bool_t is_active)
             free(ctx);
             return;
         }
-        free(ack);
         ctx->current_sequence_num++;
+        ctx->last_acked_sequence_num = ntohl(ack->th_ack);
+        free(ack);
     }
     ctx->connection_state = CSTATE_ESTABLISHED;
     stcp_unblock_application(sd);
@@ -227,30 +233,80 @@ static void control_loop(mysocket_t sd, context_t *ctx)
         if (event & APP_DATA)
         {
             /* the application has requested that data be sent */
-            /* see stcp_app_recv() */
-            // dst is buffer to receive data
-            // maxlen 536 bytes can be sent at once (excluding header size)
-            // either get amount of data received, or -1 for failure
-            // size_t stcp_app_recv(mysocket_t sd, void *dst, size_t max_len);
+            // read in app data
+            char *app_buf = (char *) calloc(1, STCP_MSS);
+            assert(app_buf);
+            size_t app_len = stcp_app_recv(sd, app_buf, STCP_MSS);
 
-            // send out src data from dst, length is the output of app recv
-            //ssize_t stcp_network_send(mysocket_t sd, const void *src, size_t src_len, ...);
-            // if return -1, failure
-            // else returns bytes sent
-            // if bytes sent < expected, resend?
+            // set header (current seq num, next expected + ack, header offset, window sz)
+            STCPHeader *data_hdr = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+            assert(data_hdr);
+            data_hdr->th_seq = htonl(ctx->current_sequence_num);
+            data_hdr->th_ack = htonl(ctx->next_expected_sequence_num);
+            data_hdr->th_flags = TH_ACK;
+            data_hdr->th_off = sizeof(STCPHeader) / 4;
+            data_hdr->th_win = htons(3072);
+
+            // ensure data is sent
+            ssize_t sent = stcp_network_send(sd, data_hdr, sizeof(STCPHeader),
+                                 app_buf, app_len, NULL);
+            if (sent == -1 || (size_t) sent < sizeof(STCPHeader) + app_len) {
+                // TODO: handle error
+            }
+            free(data_hdr);
+            free(app_buf);
+            ctx->current_sequence_num += app_len;
         }
 
         if (event & NETWORK_DATA) {
             /* received data from STCP peer */
-            // dst is buffer to receive data
-            // maxlen 536 bytes can be received at once (excluding header size)
-            // either get amount of data received, or -1 for failure
-            // ssize_t stcp_network_recv(mysocket_t sd, void *dst, size_t max_len)
+            // read in network data
+            char *net_buf = (char *) calloc(1, sizeof(STCPHeader) + STCP_MSS);
+            assert(net_buf);
+            ssize_t recvd = stcp_network_recv(sd, net_buf, sizeof(STCPHeader) + STCP_MSS);
+            if (recvd == -1 || (size_t) recvd < sizeof(STCPHeader)) {
+                // handle error / drop
+            }
 
-            // send out src data from dst, length is the output of app recv
-            // void stcp_app_send(mysocket_t sd, const void *src, size_t src_len);
-            // assume success because void?
+            // compute header vs payload segments
+            STCPHeader *hdr = (STCPHeader *) net_buf;
+            size_t data_start = TCP_DATA_START(net_buf);
+            size_t payload_len = recvd - data_start;
+            tcp_seq seq = ntohl(hdr->th_seq);
 
+            // ensure in order delivery with matching next expected seq num
+            if (payload_len > 0 && seq == ctx->next_expected_sequence_num) {
+                stcp_app_send(sd, net_buf + data_start, payload_len);
+                ctx->next_expected_sequence_num += payload_len;
+            }
+
+            // handle acks by updating last acked
+            if (hdr->th_flags & TH_ACK) {
+                tcp_seq ack = ntohl(hdr->th_ack);
+                if (ack > ctx->last_acked_sequence_num) {
+                    ctx->last_acked_sequence_num = ack;
+                }
+            }
+            free(net_buf);
+        
+            // ack packets with data
+            if (payload_len > 0) {
+                // assemble ack header with current seq num and next expected
+                STCPHeader *ack_hdr = (STCPHeader *) calloc(1, sizeof(STCPHeader));
+                assert(ack_hdr);
+                ack_hdr->th_seq = htonl(ctx->current_sequence_num);
+                ack_hdr->th_ack = htonl(ctx->next_expected_sequence_num);
+                ack_hdr->th_flags = TH_ACK;
+                ack_hdr->th_off = sizeof(STCPHeader) / 4;
+                ack_hdr->th_win = htons(3072);
+
+                // send ack header
+                ssize_t ack_sent = stcp_network_send(sd, ack_hdr, sizeof(STCPHeader), NULL);
+                if (ack_sent == -1 || (size_t) ack_sent < sizeof(STCPHeader)) {
+                    // TODO: handle error
+                }
+                free(ack_hdr);
+            }
         }
 
         if (event & APP_CLOSE_REQUESTED) {
